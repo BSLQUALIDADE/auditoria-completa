@@ -1254,6 +1254,35 @@ function renderResumo(){
   body.innerHTML=h;
 }
 
+function coletarTodasFotos(){
+  var list=[];
+  ['unidade','andares','refeicao','procedimentos'].forEach(function(bk){
+    var b=BLOCOS[bk];
+    if(bk==='andares'){
+      state.andaresList.forEach(function(val,idx){
+        for(var s=0;s<b.secoes.length;s++){for(var i=0;i<b.secoes[s].itens.length;i++){
+          var fotos=state.fotos[chaveFoto(bk,idx,s,i)]||[];
+          if(fotos.length>0){
+            fotos.forEach(function(src){
+              list.push({src:src,blocoTitulo:b.titulo,andarLabel:andarLabel(val),secIcon:b.secoes[s].icon,secTitle:b.secoes[s].title,item:b.secoes[s].itens[i],obs:state.obs[chaveObs(bk,idx,s,i)]||''});
+            });
+          }
+        }}
+      });
+    }else{
+      for(var s=0;s<b.secoes.length;s++){for(var i=0;i<b.secoes[s].itens.length;i++){
+        var fotos=state.fotos[chaveFoto(bk,undefined,s,i)]||[];
+        if(fotos.length>0){
+          fotos.forEach(function(src){
+            list.push({src:src,blocoTitulo:b.titulo,andarLabel:null,secIcon:b.secoes[s].icon,secTitle:b.secoes[s].title,item:b.secoes[s].itens[i],obs:state.obs[chaveObs(bk,undefined,s,i)]||''});
+          });
+        }
+      }}
+    }
+  });
+  return list;
+}
+
 function coletarNC(){
   var list=[];
   ['unidade','andares','refeicao','procedimentos'].forEach(function(bk){
@@ -1378,6 +1407,22 @@ function gerarRelatorio(){
   h+='<div class="rel-section"><div class="rel-section-title">📄 Resumo Executivo</div>';
   h+='<div class="rel-section-body"><div class="resumo-executivo">'+execText+'</div></div></div>';
 
+  // ANEXO FOTOGRÁFICO COMPLETO
+  var todasFotosRel=coletarTodasFotos();
+  if(todasFotosRel.length>0){
+    h+='<div class="rel-section"><div class="rel-section-title">📷 Anexo Fotográfico ('+todasFotosRel.length+' evidências)</div><div class="rel-section-body">';
+    h+='<div class="foto-ev-grid">';
+    todasFotosRel.forEach(function(f){
+      h+='<div class="foto-ev-item"><img class="foto-ev-img" src="'+f.src+'">';
+      h+='<div class="foto-ev-cap"><strong>'+f.blocoTitulo+(f.andarLabel?' — '+f.andarLabel:'')+'</strong><br>';
+      h+=f.secIcon+' '+f.secTitle+'<br>';
+      h+=f.item.substring(0,40)+(f.item.length>40?'...':'');
+      if(f.obs)h+='<br><em style="opacity:.8;">📝 '+f.obs.substring(0,35)+'</em>';
+      h+='</div></div>';
+    });
+    h+='</div></div></div>';
+  }
+
   $('rel-body').innerHTML=h;
 }
 
@@ -1446,6 +1491,40 @@ function gerarPDF(){
       if(nc.fotos.length>0){body+='<div style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;">';nc.fotos.forEach(function(src){body+='<img src="'+src+'" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #FECACA;">';});body+='</div>';}
       body+='</div>';
     });
+    body+='</div>'+SE;
+  }
+
+  // RESUMO EXECUTIVO
+  var dur=Math.round((new Date()-state.inicio)/60000);
+  var execText='Auditoria realizada em '+new Date().toLocaleDateString('pt-BR')+' por '+nm+' na unidade '+state.unidade+'. ';
+  execText+='Foram avaliados '+t.total+' itens em '+state.andaresList.length+' andar(es). ';
+  execText+='O percentual geral de conformidade foi de '+pctGeral+'%, classificado como '+cls.label+'. ';
+  execText+=t.c+' itens conformes, '+t.parc+' parcialmente conformes, '+t.nc+' não conformes. ';
+  if(t.na>0)execText+=t.na+' itens não aplicáveis. ';
+  if(t.nobs>0)execText+=t.nobs+' itens não observados. ';
+  if(t.pendentes>0)execText+='⚠️ '+t.pendentes+' perguntas ficaram sem resposta. ';
+  if(dur>0)execText+='Duração total: '+dur+' minutos.';
+  body+=S+ST('📄','Resumo Executivo');
+  body+='<div style="font-size:13px;line-height:1.7;color:#1a1a1a;padding:12px;background:#F0F4FF;border-radius:6px;border-left:4px solid #1B3F72;">'+execText+'</div>';
+  body+='</div>'+SE;
+
+  // ANEXO FOTOGRÁFICO COMPLETO
+  var todasFotos=coletarTodasFotos();
+  if(todasFotos.length>0){
+    body+=S+ST('📷','Anexo Fotográfico ('+todasFotos.length+' evidências)');
+    body+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">';
+    todasFotos.forEach(function(f){
+      body+='<div style="border-radius:7px;overflow:hidden;border:1px solid #ddd;break-inside:avoid;">';
+      body+='<img src="'+f.src+'" style="width:100%;height:160px;object-fit:cover;display:block;" loading="eager">';
+      body+='<div style="padding:6px 7px;font-size:9px;color:#444;background:#f8f8f8;border-top:1px solid #eee;line-height:1.6;">';
+      body+='<strong style="color:#1B3F72;font-size:10px;">'+f.blocoTitulo+(f.andarLabel?' — '+f.andarLabel:'')+'</strong><br>';
+      body+=f.secIcon+' '+f.secTitle+'<br>';
+      body+=f.item.substring(0,50)+(f.item.length>50?'...':'')+'<br>';
+      if(f.obs)body+='<em style="color:#666;">📝 '+f.obs.substring(0,40)+'</em><br>';
+      body+='<span style="color:#888;">🕐 '+dh+' | 👤 '+nm+'</span>';
+      body+='</div></div>';
+    });
+    body+='</div>';
     body+='</div>'+SE;
   }
 
