@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BSL Auditoria Completa">
 <title>BSL Saúde — Auditoria Completa</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500&display=swap');
@@ -828,6 +829,7 @@ select.form-input{
     <button type="button" class="rel-btn rel-btn-outline" ontouchstart="" onclick="return novaAuditoria();">🔄 Nova Auditoria</button>
     <button type="button" class="rel-btn rel-btn-primary" ontouchstart="" onclick="return voltarAuditoria();">✏️ Editar</button>
     <button type="button" class="rel-btn rel-btn-green" ontouchstart="" onclick="return gerarPDF();">📄 Imprimir / PDF</button>
+    <button type="button" class="rel-btn rel-btn-outline" ontouchstart="" onclick="return exportarExcel();">📊 Exportar Excel</button>
   </div>
 </div>
 
@@ -1055,17 +1057,51 @@ function selResp(bloco,andar,s,i,val,btn){
 }
 
 // ========== FOTOS ==========
+// ========== COMPRESSÃO DE IMAGEM ==========
+var FOTO_MAX_DIM=1200;var FOTO_QUALIDADE=0.75;
+
+function comprimirImagem(file){
+  return new Promise(function(resolve){
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var img=new Image();
+      img.onload=function(){
+        try{
+          var w=img.width,h=img.height;
+          if(w>FOTO_MAX_DIM||h>FOTO_MAX_DIM){
+            if(w>h){h=Math.round(h*(FOTO_MAX_DIM/w));w=FOTO_MAX_DIM;}
+            else{w=Math.round(w*(FOTO_MAX_DIM/h));h=FOTO_MAX_DIM;}
+          }
+          var canvas=document.createElement('canvas');
+          canvas.width=w;canvas.height=h;
+          var ctx=canvas.getContext('2d');
+          ctx.drawImage(img,0,0,w,h);
+          var dataUrl=canvas.toDataURL('image/jpeg',FOTO_QUALIDADE);
+          resolve(dataUrl);
+        }catch(err){resolve(e.target.result);}
+      };
+      img.onerror=function(){resolve(e.target.result);};
+      img.src=e.target.result;
+    };
+    reader.onerror=function(){resolve(null);};
+    reader.readAsDataURL(file);
+  });
+}
+
 function addFotos(bloco,andar,s,i,input){
   var fk=chaveFoto(bloco,andar,s,i);if(!state.fotos[fk])state.fotos[fk]=[];
-  var files=Array.from(input.files);var loaded=0;
-  files.forEach(function(f){var r=new FileReader();r.onload=function(e){
-    state.fotos[fk].push(e.target.result);loaded++;
-    if(loaded===files.length){
-      var k=chaveItem(bloco,andar,s,i);
-      var fp=$('fp_'+k);if(fp)fp.innerHTML=renderFotosHTML(state.fotos[fk],bloco,andar,s,i);
-      var el=$('item_'+k);if(el){var fc=el.querySelector('.foto-count');if(fc)fc.textContent=state.fotos[fk].length+' foto(s)';}
-      marcarSujo();
-    }};r.readAsDataURL(f);});input.value='';
+  var files=Array.from(input.files);
+  if(files.length===0)return;
+  var k=chaveItem(bloco,andar,s,i);
+  var fp=$('fp_'+k);
+  showSaveIndicator('saving','Processando foto(s)...');
+  Promise.all(files.map(comprimirImagem)).then(function(results){
+    results.forEach(function(dataUrl){if(dataUrl)state.fotos[fk].push(dataUrl);});
+    if(fp)fp.innerHTML=renderFotosHTML(state.fotos[fk],bloco,andar,s,i);
+    var el=$('item_'+k);if(el){var fc=el.querySelector('.foto-count');if(fc)fc.textContent=state.fotos[fk].length+' foto(s)';}
+    marcarSujo();
+  });
+  input.value='';
 }
 function delFoto(bloco,andar,s,i,idx){
   var fk=chaveFoto(bloco,andar,s,i);if(state.fotos[fk])state.fotos[fk].splice(idx,1);
@@ -1449,6 +1485,54 @@ function renderRelSecao(bk,andar,s,sec,dataHora){
 }
 
 // ========== PDF ==========
+// ========== EXPORTAR EXCEL ==========
+var RESP_LABEL={conf:'Conforme',nc:'Não Conforme',parc:'Parcial Conforme',na:'Não Aplicável',nobs:'Não Observado','':'Sem Resposta'};
+var RESP_CODE={conf:1,nc:0,parc:0.5};
+
+function linhasExcel(){
+  var linhas=[];var dataAud=new Date().toLocaleDateString('pt-BR');var horaAud=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  var num=0;
+  ['unidade','andares','refeicao','procedimentos'].forEach(function(bk){
+    var b=BLOCOS[bk];
+    if(bk==='andares'){
+      state.andaresList.forEach(function(val,idx){
+        for(var s=0;s<b.secoes.length;s++){for(var i=0;i<b.secoes[s].itens.length;i++){
+          num++;
+          var k=chaveItem(bk,idx,s,i);var v=state.respostas[k]||'';
+          var obs=state.obs[chaveObs(bk,idx,s,i)]||'';var fotos=state.fotos[chaveFoto(bk,idx,s,i)]||[];
+          linhas.push({Num:num,Data:dataAud,Hora:horaAud,Unidade:state.unidade,Auditor:state.nome,Bloco:b.titulo,Andar:andarLabel(val),Secao:b.secoes[s].title,Pergunta:b.secoes[s].itens[i],Resposta:RESP_LABEL[v]||'Sem Resposta',CodigoResposta:RESP_CODE[v]!==undefined?RESP_CODE[v]:'',Observacao:obs,QtdFotos:fotos.length});
+        }}
+      });
+    }else{
+      for(var s=0;s<b.secoes.length;s++){for(var i=0;i<b.secoes[s].itens.length;i++){
+        num++;
+        var k=chaveItem(bk,undefined,s,i);var v=state.respostas[k]||'';
+        var obs=state.obs[chaveObs(bk,undefined,s,i)]||'';var fotos=state.fotos[chaveFoto(bk,undefined,s,i)]||[];
+        linhas.push({Num:num,Data:dataAud,Hora:horaAud,Unidade:state.unidade,Auditor:state.nome,Bloco:b.titulo,Andar:'',Secao:b.secoes[s].title,Pergunta:b.secoes[s].itens[i],Resposta:RESP_LABEL[v]||'Sem Resposta',CodigoResposta:RESP_CODE[v]!==undefined?RESP_CODE[v]:'',Observacao:obs,QtdFotos:fotos.length});
+      }}
+    }
+  });
+  return linhas;
+}
+
+function exportarExcel(){
+  if(typeof XLSX==='undefined'){alert('Não foi possível carregar a biblioteca de exportação. Verifique sua conexão com a internet e tente novamente.');return false;}
+  var linhas=linhasExcel();
+  if(linhas.length===0){alert('Não há dados para exportar.');return false;}
+  var ws=XLSX.utils.json_to_sheet(linhas);
+  ws['!cols']=[{wch:5},{wch:11},{wch:7},{wch:18},{wch:18},{wch:24},{wch:14},{wch:24},{wch:55},{wch:16},{wch:8},{wch:40},{wch:9}];
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Auditoria Detalhada');
+  var t=contarTodos();var pctGeral=t.total>0?Math.round(t.c/t.total*100):0;var cls=classificar(pctGeral);
+  var resumo=[{Indicador:'Unidade',Valor:state.unidade},{Indicador:'Auditor',Valor:state.nome},{Indicador:'Data',Valor:new Date().toLocaleDateString('pt-BR')},{Indicador:'Andares Auditados',Valor:state.andaresList.length},{Indicador:'Total de Itens Avaliados',Valor:t.total},{Indicador:'Conformes',Valor:t.c},{Indicador:'Parcialmente Conformes',Valor:t.parc},{Indicador:'Não Conformes',Valor:t.nc},{Indicador:'Não Aplicáveis',Valor:t.na},{Indicador:'Não Observados',Valor:t.nobs},{Indicador:'Pendentes',Valor:t.pendentes},{Indicador:'% Conformidade',Valor:pctGeral+'%'},{Indicador:'Classificação',Valor:cls.label}];
+  var ws2=XLSX.utils.json_to_sheet(resumo);
+  ws2['!cols']=[{wch:26},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Resumo');
+  var fname='Auditoria_'+state.unidade.replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  XLSX.writeFile(wb,fname);
+  return false;
+}
+
 function gerarPDF(){
   var t=contarTodos();var pctGeral=t.total>0?Math.round(t.c/t.total*100):0;var cls=classificar(pctGeral);
   var nm=state.nome;var dh=new Date().toLocaleString('pt-BR');
